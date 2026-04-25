@@ -1,0 +1,1519 @@
+---
+title: "ST327 Individual Project — Public Attitudes to AI"
+subtitle: "A revolution unlike its predecessors"
+author: "Working notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    fig_caption: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  fig.align = "center", fig.width = 6.5, fig.height = 4.2, dpi = 150
+)
+library(readxl); library(dplyr); library(tidyr); library(ggplot2); library(scales)
+library(psych); library(cluster); library(factoextra); library(MASS); library(broom)
+library(knitr)
+
+df <- read_excel("ST327 AI survey RS1.xlsx")
+q2_cols <- c(paste0("q2_0", 1:9), "q2_10")
+q3_cols <- c(paste0("q3_0", 1:9), paste0("q3_", 10:12))
+q4_cols <- paste0("q4_0", 1:5)
+df$q1[df$q1 %in% c(8, 9)] <- NA
+df[q2_cols] <- lapply(df[q2_cols], function(x) ifelse(x == 6, NA, x))
+df[q4_cols] <- lapply(df[q4_cols], function(x) ifelse(x == 99, NA, x))
+df <- df %>% mutate(
+  gender    = factor(demogs_gender, levels = 1:4,
+                     labels = c("Male","Female","Other","PNTS")),
+  age_band  = factor(demogs_age, levels = 2:7,
+                     labels = c("18-24","25-34","35-44","45-54","55-64","65+")),
+  seg       = factor(demogs_seg, levels = 1:6, labels = c("A","B","C1","C2","D","E")),
+  education = factor(demogs_education, levels = 1:8,
+                     labels = c("No formal","Primary","Secondary/GCSE/A-level",
+                                "University degree","Higher degree/doctorate",
+                                "Still in FT education","Don't know","Refused")),
+  usage_bin = factor(case_when(q1 %in% 1:3 ~ "Weekly+",
+                               q1 %in% 4:6 ~ "Occasional",
+                               q1 == 7     ~ "Never"),
+                     levels = c("Weekly+","Occasional","Never")),
+  q1_label = factor(q1, levels = 1:7,
+                    labels = c("Every day","Most days","1-2x/week",
+                               "1-2x/month","Every ~3 months","Less often","Never")),
+  work_status = factor(demogs_status3b, levels = 1:12,
+                       labels = c("Furloughed","FT employee (30+h)","PT employee (8-29h)",
+                                  "Self-emp FT","Self-emp PT","Unemployed / seeking",
+                                  "Not working / not seeking","Student",
+                                  "Retired (state)","Retired (private)",
+                                  "Homemaker","Refused")),
+  income_band = factor(case_when(
+    demogs_income %in% 1:3   ~ "Under £21k",
+    demogs_income %in% 4:6   ~ "£21k-£41k",
+    demogs_income %in% 7:9   ~ "£41k-£62k",
+    demogs_income %in% 10:12 ~ "£62k-£83k",
+    demogs_income == 13      ~ "£83k+"
+  ), levels = c("Under £21k","£21k-£41k","£41k-£62k","£62k-£83k","£83k+")),
+  ethnicity_grp = factor(case_when(
+    demogs_ethnicity2 %in% 1:9   ~ "White",
+    demogs_ethnicity2 %in% 10:26 ~ "Minority ethnic",
+    TRUE ~ NA_character_),
+    levels = c("White","Minority ethnic")),
+  marital_grp = factor(case_when(
+    demogs_marital %in% c(2,3,4) ~ "Married/cohabiting",
+    demogs_marital %in% c(1,5,6,7) ~ "Single/other",
+    TRUE ~ NA_character_),
+    levels = c("Single/other","Married/cohabiting")),
+  has_disability = factor(ifelse(demogs_disability1 == 1, "Yes", "No"),
+                          levels = c("No","Yes")),
+  has_children = factor(ifelse(demogs_children1 == 1, "No", "Yes"),
+                        levels = c("No","Yes"))
+)
+theme_set(theme_minimal(base_size = 10))
+```
+
+# Discussion of the research aims
+
+## Why this matters
+
+AI is, by most accounts, the **fourth industrial revolution** — and the
+first one to threaten knowledge work as much as manual work. Past
+technological shifts hit specific groups: skilled artisans during 19th
+century mechanisation, factory workers during 20th century automation.
+Decades of attitudes-to-technology research have shown a robust pattern
+in their wake — educated and affluent groups have been consistently
+more enthusiastic about new technology, working-class groups more
+skeptical.
+
+What makes AI different is its breadth. Large language models target
+the cognitive tasks that have until recently been among the safest jobs
+in a developed economy: legal drafting, copywriting, junior coding,
+financial analysis, customer service, parts of teaching and medicine.
+The exposure profile is unfamiliar — and the public's response is a
+question worth asking carefully, with practical consequences for
+businesses (who is adopting, who is resisting), policymakers (who is
+worried, who needs reassurance), and the AI industry itself (whose
+trust it has yet to win).
+
+## The research questions
+
+The brief sets five aims. Read together, they map onto three
+substantive public-facing questions and two analytical moves that
+sharpen the answers.
+
+**Substantive questions**
+
+1. **Who is adopting AI?** *(Aim 1 — usage)*
+2. **What does the public think about its benefits, risks and impact
+   on society?** *(Aim 2 — attitudes)*
+3. **How does the public want AI to be governed?** *(Aim 3 —
+   governance)*
+
+**Analytical moves to deepen the answers**
+
+4. **Segment the public by mindset** to identify distinct
+   attitudinal groups beyond the aggregate numbers *(Aim 4 —
+   clusters)*.
+5. **Listen to the public's own words** about hopes and concerns,
+   and link these back to the segments *(Aim 5 — open text)*.
+
+## How the questionnaire serves the aims
+
+The instrument has clear strengths and one notable gap.
+
+**Strengths.** Q1 gives a clean ordinal usage measure. Q2 is a 10-item
+Likert battery that splits cleanly into a coherent positivity scale and
+a wider concerns set. Q3 enumerates institutional actors. Q5 is
+genuinely open-ended. The full demographic suite supports detailed
+cross-cuts without leaning on a single classification.
+
+**Notable gap.** Q1 measures *frequency* of AI use, not *purpose*. We
+can identify who uses AI more; we cannot identify why. Any functional
+reading (study tool, work tool, companionship) is a hypothesis, not a
+finding. This shapes the language throughout the report.
+
+## Approach
+
+This report addresses each aim in turn, with the brief's own emphasis
+guiding how much space each analysis gets.
+
+| Aim | Brief's emphasis | What this report leads with |
+|---|---|---|
+| 1 Usage | "differences across the population" | Full demographic sweep |
+| 2 Attitudes | "how people evaluate AI" | Overall picture, scale structure, then a deep dive on who is worried about jobs |
+| 3 Governance | "relates to broader attitudes" | Q3 × Q2 cross-references |
+| 4 Clusters | "selected demographic variables" | Named clusters, five-variable profile |
+| 5 Open text | "relate back to the groups in (4)" | Themes × clusters |
+
+**Cleaning.** Supplier FIX codes recoded to missing (Q1 values 8/9, Q2
+value 6, Q4 value 99). Demographics converted to labelled factors
+against the official codebook. Ordinal usage binned to `Weekly+ /
+Occasional / Never` for visual clarity; the underlying 1–7 scale is
+used in regression.
+
+---
+
+# Sample profile
+
+```{r profile}
+prof <- function(var, label) {
+  df %>% filter(!is.na({{var}})) %>% count({{var}}) %>%
+    mutate(pct = round(n / sum(n) * 100, 1)) %>% rename(!!label := 1)
+}
+kable(prof(age_band,       "Age"),          caption = "Age band")
+kable(prof(gender,         "Gender"),       caption = "Gender")
+kable(prof(seg,            "SEG"),          caption = "Social grade (SEG)")
+kable(prof(education,      "Education"),    caption = "Highest education")
+kable(prof(work_status,    "Work status"),  caption = "Working status")
+kable(prof(income_band,    "Income"),       caption = "Household income band")
+
+kable(prof(ethnicity_grp,  "Ethnicity"),  caption = "Ethnicity (collapsed)")
+eth_labels <- c("English","Welsh","Scottish","Northern Irish","British","Irish",
+                "Irish Traveller or Gypsy","Roma","Any other White background",
+                "Bangladeshi","Indian","Pakistani","Sri Lankan",
+                "Any other Asian background","African","Caribbean",
+                "Any other Black / Black British / Caribbean / African background",
+                "Asian and White","Black African and Asian","Black African and White",
+                "Black Caribbean and Asian","Black Caribbean and White",
+                "Any other mixed or multiple background","Chinese","Arab",
+                "Any other ethnic group","Prefer not to say")
+df %>% filter(!is.na(demogs_ethnicity2)) %>% count(demogs_ethnicity2) %>%
+  mutate(Ethnicity = eth_labels[demogs_ethnicity2],
+         pct = round(n / sum(n) * 100, 1)) %>%
+  dplyr::select(Ethnicity, n, pct) %>%
+  kable(caption = "Ethnicity (full detail, 27 categories)")
+
+kable(prof(has_disability, "Disability"), caption = "Any long-standing condition")
+dis_cols <- paste0("demogs_disability", 1:7)
+dis_labels <- c("NET: any disability","Mental condition","Physical condition",
+                "Disability (unspecified)","Other","No disability","Refused")
+data.frame(
+  `Disability type` = dis_labels,
+  `% selecting`     = round(sapply(df[dis_cols], function(x) mean(x == 1, na.rm = TRUE)) * 100, 1),
+  check.names = FALSE
+) %>% kable(caption = "Disability sub-categories")
+
+kable(prof(has_children, "Children"), caption = "Any child aged 18 or under")
+ch_cols <- paste0("demogs_children", 1:6)
+ch_labels <- c("No children aged 18 or under","Children under 5","Children aged 5-10",
+               "Children aged 11-15","Children aged 16-18","Refused")
+data.frame(
+  `Children category` = ch_labels,
+  `% selecting`       = round(sapply(df[ch_cols], function(x) mean(x == 1, na.rm = TRUE)) * 100, 1),
+  check.names = FALSE
+) %>% kable(caption = "Children in household")
+
+kable(prof(marital_grp, "Marital"), caption = "Marital status (collapsed)")
+```
+
+## Variables excluded from the analysis
+
+Three demographic variables — `demogs_hols` (foreign holidays),
+`demogs_cars` (cars in household), `demogs_town` (urban/rural) — are
+**affluence proxies** for variables we already use (SEG, income, age).
+Including them would introduce multicollinearity without adding signal.
+
+```{r excluded-corr}
+df %>% dplyr::select(demogs_hols, demogs_cars, demogs_town,
+                     demogs_seg, demogs_income, demogs_age) %>%
+  cor(use = "pairwise.complete.obs") %>% round(2) %>%
+  kable(caption = "Correlations between excluded variables and SEG/income/age")
+```
+
+Ethnicity, disability, children-in-household and marital status are
+*kept* because they carry distinct information (lived experience with
+algorithmic bias, assistive-technology exposure, household context) that
+is not a re-expression of SEG or income.
+
+---
+
+# Aim 1 — How people use AI
+
+*The adoption phase of the revolution: who is already inside, who is
+not, and where the lines run.*
+
+The brief explicitly asks for *differences across the population*. This
+is the one section where full demographic sweep is the deliverable.
+
+## Overall usage distribution
+
+```{r q1-overall, fig.cap="Q1: How often do you use AI? (%)"}
+df %>% filter(!is.na(q1_label)) %>% count(q1_label) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(q1_label, pct)) +
+  geom_col(fill = "#2E86AB") +
+  geom_text(aes(label = sprintf("%.1f%%", pct)), vjust = -0.3, size = 3) +
+  labs(x = NULL, y = "% of respondents") +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+```
+
+```{r q1-headline}
+q1v <- df$q1[!is.na(df$q1)]
+pct <- function(cond) round(mean(cond) * 100, 1)
+data.frame(
+  Metric = c("% weekly+ (codes 1-3)", "% occasional (4-6)", "% never (7)",
+             "% any use (1-6)", "n valid"),
+  Value  = c(paste0(pct(q1v %in% 1:3), "%"),
+             paste0(pct(q1v %in% 4:6), "%"),
+             paste0(pct(q1v == 7),     "%"),
+             paste0(pct(q1v %in% 1:6), "%"),
+             as.character(length(q1v)))
+) %>% kable(caption = "Headline usage statistics")
+```
+
+**Reading.** The public splits into roughly three camps: weekly users,
+occasional users, and never-users. Daily/most-day use is now a
+mass-adoption pattern. The "Never" group is large enough that any
+policy narrative assuming the whole public uses AI is wrong for about
+a third of adults.
+
+> **Limitation.** Everything below describes *frequency*, not *purpose*.
+> A daily user is someone who opens an AI tool most days — for coursework,
+> work, emotional support, entertainment, or curiosity — and this survey
+> cannot distinguish those uses.
+
+## Usage by age
+
+```{r q1-age, fig.cap="Usage intensity by age band (%)"}
+df %>% filter(!is.na(usage_bin), !is.na(age_band)) %>%
+  count(age_band, usage_bin) %>% group_by(age_band) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(age_band, pct, fill = usage_bin)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f", pct)),
+            position = position_stack(vjust = 0.5), size = 3, colour = "white") +
+  scale_fill_manual(values = c("Weekly+"="#2E86AB","Occasional"="#F5B041","Never"="#C73E1D")) +
+  labs(x = NULL, y = "% of respondents", fill = NULL) +
+  theme(legend.position = "bottom")
+```
+
+Age is the steepest gradient. Weekly+ use falls from roughly 70% among
+18–34s to roughly 24% among 65+; the over-65 group has a majority
+Never rate.
+
+## Usage by SEG
+
+```{r q1-seg, fig.cap="Usage intensity by social grade (%)"}
+df %>% filter(!is.na(usage_bin), !is.na(seg)) %>%
+  count(seg, usage_bin) %>% group_by(seg) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(seg, pct, fill = usage_bin)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f", pct)),
+            position = position_stack(vjust = 0.5), size = 3, colour = "white") +
+  scale_fill_manual(values = c("Weekly+"="#2E86AB","Occasional"="#F5B041","Never"="#C73E1D")) +
+  labs(x = "Social grade", y = "% of respondents", fill = NULL) +
+  theme(legend.position = "bottom")
+```
+
+Monotonic gradient: weekly+ use drops from ~59% in grade A to ~27% in
+grade E. The Never bar roughly doubles across grades.
+
+## Usage by education — two hypotheses
+
+Two distinct questions live inside the education variable, and they
+deserve separate tests.
+
+- **Human-capital hypothesis:** does *completed* education predict
+  usage? (Compare GCSE vs University vs Higher degree.)
+- **Tool-for-study hypothesis:** do people currently in FT education
+  use AI more than similar-age non-students? (Student vs non-student,
+  18–34 only, to strip out age.)
+
+```{r q1-edu-completed, fig.cap="Usage by completed education level (%)"}
+df %>% filter(!is.na(usage_bin), education %in%
+                c("Secondary/GCSE/A-level","University degree","Higher degree/doctorate")) %>%
+  mutate(education = droplevels(education)) %>%
+  count(education, usage_bin) %>% group_by(education) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(education, pct, fill = usage_bin)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f", pct)),
+            position = position_stack(vjust = 0.5), size = 3, colour = "white") +
+  scale_fill_manual(values = c("Weekly+"="#2E86AB","Occasional"="#F5B041","Never"="#C73E1D")) +
+  labs(x = NULL, y = "% of respondents", fill = NULL) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 15, hjust = 1))
+```
+
+Clear gradient across the three completed tiers: weekly+ use rises with
+each qualification step. Education and SEG overlap by construction, so
+the regression below tells us whether education adds independent
+signal.
+
+```{r q1-student-age}
+df %>% filter(!is.na(usage_bin), age_band %in% c("18-24","25-34")) %>%
+  mutate(student = factor(
+    ifelse(education == "Still in FT education", "Current student", "Non-student"),
+    levels = c("Non-student","Current student"))) %>%
+  count(student, usage_bin) %>% group_by(student) %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  dplyr::select(student, usage_bin, pct, n) %>%
+  tidyr::pivot_wider(names_from = usage_bin, values_from = c(pct, n)) %>%
+  kable(caption = "Current students vs non-students, 18-34 only")
+```
+
+```{r q1-student-chi}
+sub <- df %>% filter(!is.na(usage_bin), age_band %in% c("18-24","25-34")) %>%
+  mutate(student = ifelse(education == "Still in FT education", "Student", "Non-student"))
+ch <- suppressWarnings(chisq.test(table(sub$student, sub$usage_bin)))
+data.frame(Test = "Chi-square (student × usage, 18-34 only)",
+           Statistic = round(ch$statistic, 2),
+           df = ch$parameter,
+           `p-value` = round(ch$p.value, 4),
+           check.names = FALSE) %>% kable()
+```
+
+**Reading.** Restricting to 18–34s isolates the student effect from
+the age effect. If current students still use AI more than age-matched
+non-students, this is *consistent with* the tool-for-study hypothesis —
+but we cannot distinguish study use from other student-typical uses
+(emotional support, entertainment) with a frequency question. Read
+this as an association, not a mechanism.
+
+## Usage by working status
+
+```{r q1-work, fig.cap="Usage intensity by working status (%)"}
+df %>% filter(!is.na(usage_bin), !is.na(work_status)) %>%
+  count(work_status, usage_bin) %>% group_by(work_status) %>%
+  mutate(pct = n / sum(n) * 100, total = sum(n)) %>%
+  filter(total >= 15) %>%
+  ggplot(aes(work_status, pct, fill = usage_bin)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f", pct)),
+            position = position_stack(vjust = 0.5), size = 3, colour = "white") +
+  scale_fill_manual(values = c("Weekly+"="#2E86AB","Occasional"="#F5B041","Never"="#C73E1D")) +
+  labs(x = NULL, y = "% of respondents", fill = NULL,
+       caption = "Groups with n<15 excluded for stability") +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 20, hjust = 1))
+```
+
+Students and full-time employees are the heaviest users; retirees the
+lightest — largely an age echo. Whether heavier usage among white-
+collar workers reflects job demands, personal overflow, or higher
+digital literacy is not identifiable from this data.
+
+## Usage by household income
+
+```{r q1-inc, fig.cap="Usage intensity by household income (%)"}
+df %>% filter(!is.na(usage_bin), !is.na(income_band)) %>%
+  count(income_band, usage_bin) %>% group_by(income_band) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(income_band, pct, fill = usage_bin)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f", pct)),
+            position = position_stack(vjust = 0.5), size = 3, colour = "white") +
+  scale_fill_manual(values = c("Weekly+"="#2E86AB","Occasional"="#F5B041","Never"="#C73E1D")) +
+  labs(x = "Household income", y = "% of respondents", fill = NULL) +
+  theme(legend.position = "bottom")
+```
+
+Reinforces the SEG story: weekly+ use roughly doubles from the lowest
+band to the highest.
+
+## Chi-square tests: usage × primary demographics
+
+```{r q1-chi}
+chi_var <- function(var) {
+  d <- df[!is.na(df$usage_bin) & !is.na(df[[var]]), ]
+  tab <- table(d[[var]], d$usage_bin)
+  if (min(dim(tab)) < 2) return(c(stat = NA, df = NA, p = NA, n = sum(tab)))
+  ch <- suppressWarnings(chisq.test(tab))
+  c(stat = unname(ch$statistic), df = unname(ch$parameter),
+    p = unname(ch$p.value), n = sum(tab))
+}
+vars <- c("age_band","seg","gender","education","work_status","income_band")
+labs <- c("Age","SEG","Gender","Education","Working status","Household income")
+m <- t(sapply(vars, chi_var))
+data.frame(Variable = labs,
+           `Chi-square` = round(m[,"stat"], 2),
+           df = m[,"df"],
+           `p-value` = round(m[,"p"], 4),
+           n = m[,"n"],
+           check.names = FALSE) %>%
+  kable(caption = "Chi-square tests: usage × demographics")
+```
+
+Every variable except gender is significant at p<0.01. Age and
+education produce the largest statistics, followed by working status,
+SEG and income — the "digital divide" cluster moves together. Gender
+sits just above significance. These variables overlap heavily, so the
+regression below disentangles independent effects.
+
+## Secondary demographics (brief check)
+
+Tested once as a robustness check, not featured.
+
+```{r q1-secondary}
+sec_test <- function(var, name) {
+  d <- df[!is.na(df[[var]]) & !is.na(df$usage_bin), ]
+  tab <- table(d[[var]], d$usage_bin)
+  ch <- suppressWarnings(chisq.test(tab))
+  weekly_by <- round(prop.table(tab, 1)[, "Weekly+"] * 100, 1)
+  data.frame(
+    Variable = name,
+    Levels   = paste(names(weekly_by), weekly_by, sep="=", collapse=" | "),
+    `Chi-square` = round(ch$statistic, 2),
+    df = ch$parameter,
+    `p-value` = round(ch$p.value, 4),
+    check.names = FALSE
+  )
+}
+bind_rows(
+  sec_test("ethnicity_grp",  "Ethnicity"),
+  sec_test("has_disability", "Disability"),
+  sec_test("has_children",   "Children in household"),
+  sec_test("marital_grp",    "Marital status")
+) %>% kable(caption = "Q1 × secondary demographics")
+```
+
+Three of four are significant at the bivariate level (ethnicity,
+children, disability). All three are substantially confounded with age
+and SEG — they do not survive multivariate adjustment (see regression
+below). Marital status produces no meaningful raw gap.
+
+## News-source diet
+
+Not a brief-mandated axis, but a strong association worth flagging:
+media consumption style predicts AI usage more sharply than most
+demographics.
+
+```{r news-setup}
+df <- df %>% mutate(
+  news_trad_tv_radio = factor(ifelse(
+    demogs_newssources01 == 1 | demogs_newssources02 == 1, "Yes","No"),
+    levels = c("No","Yes")),
+  news_broadsheet    = factor(ifelse(demogs_newssources03 == 1, "Yes","No"),
+                              levels = c("No","Yes")),
+  news_social_any    = factor(ifelse(
+    demogs_newssources07 == 1 | demogs_newssources08 == 1 |
+    demogs_newssources09 == 1 | demogs_newssources10 == 1 |
+    demogs_newssources11 == 1 | demogs_newssources12 == 1 |
+    demogs_newssources13 == 1, "Yes","No"),
+    levels = c("No","Yes")),
+  news_tiktok        = factor(ifelse(demogs_newssources11 == 1, "Yes","No"),
+                              levels = c("No","Yes")),
+  news_reddit        = factor(ifelse(demogs_newssources12 == 1, "Yes","No"),
+                              levels = c("No","Yes"))
+)
+```
+
+```{r news-table}
+news_row <- function(var, name) {
+  d <- df[!is.na(df[[var]]) & !is.na(df$usage_bin), ]
+  tab <- table(d[[var]], d$usage_bin)
+  w_yes <- round(prop.table(tab, 1)["Yes", "Weekly+"] * 100, 1)
+  w_no  <- round(prop.table(tab, 1)["No",  "Weekly+"] * 100, 1)
+  ch <- suppressWarnings(chisq.test(tab))
+  data.frame(
+    `Source`               = name,
+    `% Weekly+ (uses)`     = w_yes,
+    `% Weekly+ (doesn't)`  = w_no,
+    `Δ (pp)`               = round(w_yes - w_no, 1),
+    `p-value`              = round(ch$p.value, 4),
+    check.names            = FALSE
+  )
+}
+bind_rows(
+  news_row("news_trad_tv_radio", "Traditional TV / radio news"),
+  news_row("news_broadsheet",    "Broadsheet newspapers"),
+  news_row("news_social_any",    "Any social-media news"),
+  news_row("news_tiktok",        "TikTok for news"),
+  news_row("news_reddit",        "Reddit for news")
+) %>% kable(caption = "AI weekly+ usage by news-source diet")
+```
+
+**Reading.** Social-media news consumption predicts AI usage very
+strongly. TikTok-for-news users reach ~69% weekly+, non-users ~41% — a
+28-point gap, bigger than any single demographic variable. Reddit
+users reach ~78% weekly+. Broadsheet reading does *not* predict AI
+usage (p ≈ 0.19); traditional TV/radio only weakly (p ≈ 0.045). These
+are associations — heavy social-media news consumers are
+disproportionately young and digitally native.
+
+## Independent effects — ordinal logistic regression
+
+All demographics together on the 7-point Q1 scale.
+
+```{r polr}
+mod_df <- df %>% mutate(q1_f = factor(q1, ordered = TRUE)) %>%
+  filter(!is.na(q1_f), !is.na(age_band), !is.na(gender), !is.na(seg),
+         !is.na(education), !is.na(ethnicity_grp), !is.na(has_disability),
+         !is.na(has_children), !is.na(marital_grp))
+mod <- MASS::polr(q1_f ~ age_band + gender + seg + education +
+                         ethnicity_grp + has_disability + has_children + marital_grp,
+                  data = mod_df, Hess = TRUE)
+tidy(mod) %>% filter(coef.type == "coefficient") %>%
+  mutate(p_value = round(2 * (1 - pnorm(abs(statistic))), 4),
+         odds_ratio = round(exp(estimate), 2),
+         estimate = round(estimate, 2), std.error = round(std.error, 2),
+         sig = ifelse(p_value < 0.001, "***",
+              ifelse(p_value < 0.01, "**",
+              ifelse(p_value < 0.05, "*", "")))) %>%
+  dplyr::select(term, estimate, std.error, odds_ratio, p_value, sig) %>%
+  kable(caption = "Ordinal logistic regression. Positive estimates = less frequent use.")
+```
+
+**Interpretation.**
+
+- **Age** is the dominant independent driver. 65+ vs 18–24 shifts the
+  odds of being in a *lower* usage category by roughly 8×.
+- **Gender.** Female is an independent negative predictor at p<0.05 —
+  the gender gap that sat at p≈0.06 in the chi-square test survives
+  once SEG is in the model. SEG was partially masking gender.
+- **SEG and education** both retain independent signal. Education is
+  *not* fully absorbed by SEG — more schooling predicts more AI use
+  even at constant SEG, consistent with a digital-literacy mechanism.
+- **Secondary demographics all fall away.** Ethnicity, disability,
+  children, marital — all non-significant at p<0.05 after adjustment.
+  The raw 26-point ethnicity gap and 22-point parents gap were age/SEG
+  confounds.
+
+## Aim 1 summary
+
+AI adoption in the UK is sharply stratified by age, SEG, education and
+news-consumption style. Ethnicity, disability, children in household
+and marital status do not add independent signal. Gender matters once
+SEG is controlled. The "digital divide" label fits — access to the AI
+transition is concentrated among the young, the educated and the
+higher-SEG.
+
+---
+
+# Aim 2 — Attitudes towards AI
+
+*The hopes and fears the revolution generates — how the public weighs
+opportunity, risk, trust and impact.*
+
+The brief asks *how people evaluate AI*. The deliverable here is the
+overall picture; demographic variation is secondary and handled
+compactly. We then take a deeper look at the one item that bears most
+directly on the labour-displacement narrative: who agrees that AI will
+reduce jobs?
+
+## Full response distributions
+
+```{r q2-stacked, fig.cap="Q2: full distribution per item (%)", fig.height=5}
+q2_labels <- c(q2_01="Some left behind", q2_02="AI improves my life",
+               q2_03="Regulation slows innovation", q2_04="Tech cos self-regulate",
+               q2_05="More opportunities", q2_06="AI makes me optimistic",
+               q2_07="Benefits outweigh risks", q2_08="AI threatens privacy",
+               q2_09="AI makes fewer mistakes", q2_10="AI will reduce jobs")
+df %>% dplyr::select(all_of(q2_cols)) %>%
+  tidyr::pivot_longer(everything(), names_to = "item", values_to = "resp") %>%
+  filter(!is.na(resp)) %>%
+  count(item, resp) %>% group_by(item) %>% mutate(pct = n / sum(n) * 100) %>%
+  mutate(item = q2_labels[item],
+         resp = factor(resp, levels = 1:5,
+                       labels = c("Strongly disagree","Disagree","Neutral","Agree","Strongly agree"))) %>%
+  ggplot(aes(pct, item, fill = resp)) +
+  geom_col() +
+  scale_fill_manual(values = c("Strongly disagree"="#C73E1D","Disagree"="#E27D60",
+                               "Neutral"="#D6D6D6","Agree"="#86B3C8","Strongly agree"="#2E86AB")) +
+  labs(x = "%", y = NULL, fill = NULL) +
+  theme(legend.position = "bottom")
+```
+
+## How we summarise the 10 Q2 items
+
+Ten items per respondent is too many to compare across demographics
+one at a time. The rest of Aim 2 follows a deliberate funnel from broad
+to focused.
+
+**Step 1 — net-agree per item (next sub-section).** A simple % agree
+minus % disagree score for each of the ten items, ordered. This shows
+which specific statements the public agrees with most strongly. The
+unit of analysis is the *item*.
+
+**Step 2 — scale structure (Cronbach's α).** We then test whether the
+ten items collapse cleanly into latent dimensions. They do — into two:
+
+- **Positivity scale** — q2_02 ("AI improves my life"), q2_05 ("more
+  opportunities"), q2_06 ("AI makes me optimistic"), q2_07 ("benefits
+  outweigh risks"), q2_09 ("AI makes fewer mistakes"). Pro-AI items
+  that move together (α = 0.92).
+- **Concern scale** — q2_01 ("some left behind"), q2_08 ("AI
+  threatens privacy"), q2_10 ("AI will reduce jobs"). Items about
+  societal worry, looser internal consistency (α = 0.55) — meaning
+  people pick the concern that speaks to them rather than holding a
+  uniform anti-AI view.
+
+**Step 3 — demographic variation, summarised.** With the two scales
+established, we report **Positivity mean** and **Concern mean** by
+age, gender and SEG. Both are means on the original 1–5 Likert scale
+(1 = strongly disagree, 5 = strongly agree), so 4.0 means the average
+respondent in that group is around "tend to agree" with the items in
+that scale. This lets us see at a glance whether a group leans more
+pro-AI, more concerned, or both at once — without having to read 30
+demographic-by-item tables.
+
+**Step 4 — focused deep dive on one item.** The compact summary
+flattens detail by design. So after the summary, we zoom into the
+single item with the strongest substantive stakes — q2_10, "AI will
+reduce jobs" — and test it against SEG, working status and education
+on its own.
+
+**Step 5 — Q4 semantic differential.** A separate 1–10 scale battery
+covering benefit, safety, impact, inequality and excitement. Reported
+as means.
+
+The same two scales (Positivity, Concern) reappear in Aim 3 (where we
+cross them with governance preferences) and feed the Aim 4 cluster
+solution.
+
+## Net-agree scores
+
+```{r q2-net}
+net <- sapply(df[q2_cols], function(x) {
+  x <- x[!is.na(x)]
+  round(mean(x >= 4) * 100 - mean(x <= 2) * 100, 1)
+})
+data.frame(Item = q2_labels[q2_cols], `Net-agree (%)` = net, check.names = FALSE) %>%
+  arrange(desc(`Net-agree (%)`)) %>% kable(caption = "Q2 net-agree (% agree - % disagree)")
+```
+
+**Reading.** Concerns dominate the top: "Some left behind", "AI
+threatens privacy", "AI will reduce jobs". Optimism items sit in the
+middle. "Tech cos can self-regulate" is the most rejected — the public
+does *not* trust industry self-governance. Overall: the British public
+is concerned *and* moderately optimistic at the same time.
+
+## Scale structure — two latent constructs
+
+```{r alpha}
+a_all <- psych::alpha(df[q2_cols], check.keys = TRUE)$total
+a_pos <- psych::alpha(df[c("q2_02","q2_05","q2_06","q2_07","q2_09")])$total
+a_con <- psych::alpha(df[c("q2_01","q2_08","q2_10")])$total
+data.frame(
+  Scale = c("All 10 Q2 items (auto-reversed)",
+            "Positive sub-scale (q2_02/05/06/07/09)",
+            "Concern sub-scale (q2_01/08/10)"),
+  Alpha = round(c(a_all$raw_alpha, a_pos$raw_alpha, a_con$raw_alpha), 2)
+) %>% kable(caption = "Cronbach's alpha")
+```
+
+**Key finding.** Positivity is a clean unidimensional scale (α = 0.92).
+Concerns are a grab-bag (α = 0.55) — people pick the concern that
+speaks to them rather than holding a uniform anti-AI view. This itself
+is a substantive finding: **there is no coherent anti-AI public**,
+only a coherent pro-AI public and a fragmented landscape of specific
+concerns.
+
+## Demographic variation — compact summary
+
+```{r q2-demo-compact}
+summary_row <- function(var, label) {
+  d <- df %>% filter(!is.na(.data[[var]]))
+  d %>% group_by(.data[[var]]) %>%
+    summarise(`Positivity mean` =
+              round(mean(rowMeans(dplyr::across(c(q2_02,q2_05,q2_06,q2_07,q2_09)), na.rm = TRUE), na.rm = TRUE), 2),
+              `Concern mean` =
+              round(mean(rowMeans(dplyr::across(c(q2_01,q2_08,q2_10)), na.rm = TRUE), na.rm = TRUE), 2),
+              n = n(), .groups = "drop") %>%
+    rename(Group = 1) %>% mutate(Group = as.character(Group), Variable = label) %>%
+    dplyr::select(Variable, Group, `Positivity mean`, `Concern mean`, n)
+}
+bind_rows(
+  summary_row("age_band", "Age"),
+  summary_row("gender",   "Gender"),
+  summary_row("seg",      "SEG")
+) %>% kable(caption = "Positivity and concern means by main demographics")
+```
+
+**Reading.** Positivity varies strongly with age and SEG: 18–34s and
+grade A score ~0.7 higher than 65+ and grade E on a 1–5 scale.
+Concern scores are much flatter across demographic groups. Concerns
+are broadly shared; optimism is stratified.
+
+Secondary demographics (ethnicity, disability, children, marital)
+produce some significant ANOVA results on individual items — most
+notably children-in-household (significant on 8 of 10 items) — but
+these are excluded from the main narrative because Aim 2 is about
+overall evaluation, not stratified attitudes.
+
+## Deep dive — who is worried about jobs?
+
+Q2_10 ("AI will reduce the number of jobs available") is the item that
+bears most directly on the labour-displacement narrative. If the
+traditional class pattern of tech anxiety still holds, working-class
+respondents should be more worried than middle-class respondents. If
+the AI revolution has flipped the pattern — because it threatens
+knowledge work — ABC1 should be the worried group. We test both.
+
+```{r q2-10-seg, fig.cap="Agreement that 'AI will reduce jobs', by social grade (%)"}
+df %>% filter(!is.na(q2_10), !is.na(seg)) %>%
+  group_by(seg) %>%
+  summarise(`% agree`    = round(mean(q2_10 >= 4) * 100, 1),
+            `% disagree` = round(mean(q2_10 <= 2) * 100, 1),
+            mean         = round(mean(q2_10), 2),
+            n            = n(), .groups = "drop") %>%
+  kable(caption = "Q2_10 'AI will reduce jobs' x SEG (six grades)")
+
+ch_seg <- suppressWarnings(chisq.test(table(df$q2_10, df$seg)))
+data.frame(Test = "Chi-square Q2_10 x SEG (6 levels)",
+           `Chi-square` = round(ch_seg$statistic, 2),
+           df = ch_seg$parameter,
+           `p-value` = round(ch_seg$p.value, 4),
+           check.names = FALSE) %>% kable()
+```
+
+**Reading.** Agreement is essentially flat across grades: roughly 70%
+in grade A rising to roughly 84% in grade E, with the bulk of the
+sample sitting between 75 and 85%. The chi-square is non-significant
+(p ≈ 0.18). **This is the first headline finding: job-threat anxiety
+is a cross-class consensus.** Neither the traditional pattern nor the
+inversion holds — the worry is universal.
+
+```{r q2-10-work, fig.cap="Agreement that 'AI will reduce jobs', by working status (%)"}
+df %>% filter(!is.na(q2_10), !is.na(work_status)) %>%
+  group_by(work_status) %>%
+  summarise(n = n(),
+            `% agree` = round(mean(q2_10 >= 4) * 100, 1),
+            mean      = round(mean(q2_10), 2), .groups = "drop") %>%
+  filter(n >= 15) %>% arrange(desc(`% agree`)) %>%
+  kable(caption = "Q2_10 by working status (groups with n >= 15)")
+```
+
+**Reading.** The working-status cut sharpens the picture. Agreement
+sits at 75–88% across every labour-market group — students,
+homemakers, employees, the self-employed, the unemployed. The single
+group that breaks ranks is the **retired (~53% agree)** — i.e. those
+no longer in the labour market. The threat is read as universal *for
+people who still have working lives ahead of them.*
+
+```{r q2-10-edu, fig.cap="Agreement that 'AI will reduce jobs', by completed education (%)"}
+df %>% filter(!is.na(q2_10),
+              education %in% c("Secondary/GCSE/A-level",
+                               "University degree","Higher degree/doctorate")) %>%
+  mutate(education = droplevels(education)) %>%
+  group_by(education) %>%
+  summarise(n = n(),
+            `% agree` = round(mean(q2_10 >= 4) * 100, 1),
+            mean      = round(mean(q2_10), 2), .groups = "drop") %>%
+  kable(caption = "Q2_10 by completed education tier")
+```
+
+**Reading.** Education shows a small but statistically detectable
+gradient *in the traditional direction*: secondary/A-level holders
+agree slightly more (~83%) than degree-holders (~77%). Tiny effect,
+but worth flagging — if anything, more-educated respondents are
+*marginally less* worried about jobs, the opposite of what the
+"knowledge work is now exposed" thesis would predict.
+
+### Personal benefit vs societal threat
+
+Job-threat agreement is uniform across class. But that doesn't
+necessarily mean ABC1 and C2DE see AI the same way overall. A more
+informative split: do they read AI as a *personal* benefit while still
+recognising a *societal* threat? We compare two short sub-scales.
+
+- **Personal benefit:** mean of q2_02 ("AI improves my life") and
+  q2_06 ("AI makes me optimistic") — the items that explicitly ask
+  about the respondent themselves.
+- **Societal threat:** mean of q2_10 ("AI will reduce jobs") and
+  q2_01 ("Some left behind") — items framed about wider society.
+
+```{r personal-societal}
+df <- df %>% mutate(
+  personal_benefit = rowMeans(dplyr::select(., q2_02, q2_06), na.rm = TRUE),
+  societal_threat  = rowMeans(dplyr::select(., q2_10, q2_01), na.rm = TRUE)
+)
+df %>% filter(!is.na(seg)) %>%
+  group_by(seg) %>%
+  summarise(n                  = n(),
+            `Personal benefit` = round(mean(personal_benefit, na.rm = TRUE), 2),
+            `Societal threat`  = round(mean(societal_threat,  na.rm = TRUE), 2),
+            Gap                = round(mean(personal_benefit, na.rm = TRUE) -
+                                        mean(societal_threat,  na.rm = TRUE), 2),
+            .groups = "drop") %>%
+  kable(caption = "Personal benefit vs societal threat (1-5 means) by SEG")
+```
+
+**Reading.** Both classes are net-pessimistic — every group scores
+societal threat above personal benefit. But the gap is *narrower* in
+ABC1 (about −1.0 to −1.1) than in C2DE (about −1.4 to −2.0). ABC1 hold
+the same societal worry but pair it with **more personal optimism**:
+they expect society to lose jobs and still see AI as good for them.
+C2DE share the worry without the upside.
+
+### What this section establishes
+
+1. **Job-threat anxiety is a cross-class consensus** (~80% agree
+   regardless of social grade). The only break is the retired, who are
+   out of the labour market.
+2. **Education runs *traditional***, not inverted: degree-holders are
+   slightly *less* worried than secondary-tier respondents.
+3. **Optimism is stratified**, not anxiety. ABC1 see personal benefit
+   alongside the shared worry; C2DE do not.
+
+Implications are picked up in the Discussion section at the end of the
+report. The headline for now: *the new fault line in the AI revolution
+is not who is worried — it is who gets to be hopeful too.*
+
+## Q4 semantic differential — perceptions of AI
+
+```{r q4}
+q4_mid <- sapply(df[q4_cols], function(x) round(mean(x, na.rm = TRUE), 2))
+q4_labels <- c("Harmful (1) ↔ Beneficial (10)",
+               "Risky (1) ↔ Safe (10)",
+               "Little impact (1) ↔ Major impact (10)",
+               "Increases inequality (1) ↔ Reduces inequality (10)",
+               "Threatening (1) ↔ Exciting (10)")
+data.frame(Item = q4_labels, Mean = q4_mid, check.names = FALSE) %>%
+  kable(caption = "Q4 semantic differential (1-10 scales)")
+```
+
+**Reading.** Mean benefit rating lands mid-positive. Mean safety
+rating is near neutral. Impact is strongly perceived as *major*.
+Inequality reading is worse than neutral — the public on average
+thinks AI *increases* inequality. Threatening-vs-exciting leans
+positive. The gestalt: high-impact, modestly beneficial, moderately
+risky, inequality-worsening. Matches the Q2 picture — the public
+holds both sides simultaneously.
+
+## Aim 2 summary
+
+British attitudes to AI are best described by two scales: a coherent
+positivity dimension (α = 0.92) that tracks age and SEG, and a
+fragmented landscape of specific concerns (jobs, privacy, inequality)
+that are broadly and evenly shared across demographics. The public is
+concerned *and* optimistic — not a contradiction, a composition.
+
+---
+
+# Aim 3 — Governance of AI
+
+*The institutional response — how the public wants society to take
+charge of the revolution.*
+
+The brief specifies: "who the public believes should be responsible...
+**and how this relates to broader attitudes**." The main analytical
+move here is Q3 × Q2, not Q3 × demographics.
+
+## Overall governance preferences
+
+```{r q3-overall, fig.cap="Q3: who should ensure AI is safe and fair (%)", fig.height=4.5}
+q3_labels <- c("UK Government","US Government","Tech companies","Employers","Businesses",
+               "Independent regulators","Universities","Inter-gov orgs",
+               "Public/individuals","Someone else","No one","Don't know")
+q3_pct <- sapply(df[q3_cols], function(x) mean(x == 1, na.rm = TRUE)) * 100
+data.frame(option = q3_labels, pct = round(q3_pct, 1)) %>%
+  arrange(pct) %>% mutate(option = factor(option, levels = option)) %>%
+  ggplot(aes(option, pct)) + geom_col(fill = "#2E86AB") +
+  geom_text(aes(label = sprintf("%.0f%%", pct)), hjust = -0.1, size = 3) +
+  coord_flip() + labs(x = NULL, y = NULL) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+```
+
+**Reading.** Three actors dominate: UK Government (~55%), tech
+companies themselves (~48%), independent regulators (~35%).
+Inter-governmental bodies trail at ~21%. Individual/public
+responsibility scores ~7% — the public does not see this as a
+user-managed problem.
+
+## Number of actors nominated
+
+```{r q3-nsel}
+df$q3_n <- rowSums(df[q3_cols] == 1, na.rm = TRUE)
+df %>% filter(q3_n > 0, q3_n <= 3) %>% count(q3_n) %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  rename(`# actors named` = q3_n) %>%
+  kable(caption = "Distribution of actors nominated")
+```
+
+## Governance × attitudes (the brief's ask)
+
+Does how people feel about AI predict who they want in charge?
+
+```{r q3-vs-q2-04}
+df %>% filter(!is.na(q2_04)) %>%
+  mutate(q2_04_view = case_when(q2_04 <= 2 ~ "Disagrees with self-reg",
+                                q2_04 == 3 ~ "Neutral",
+                                q2_04 >= 4 ~ "Agrees with self-reg")) %>%
+  group_by(q2_04_view) %>%
+  summarise(`Picks Tech cos`    = round(mean(q3_03 == 1) * 100, 1),
+            `Picks UK Gov`      = round(mean(q3_01 == 1) * 100, 1),
+            `Picks Indep. regs` = round(mean(q3_06 == 1) * 100, 1),
+            n = n()) %>%
+  kable(caption = "Governance choice by trust in tech self-regulation")
+```
+
+Respondents who agree tech can self-regulate pick tech companies far
+more often — an internally consistent pattern. Self-reg believers
+still put UK Gov near the top, so "self-regulation" is read as
+*within* a government framework, not instead of one.
+
+```{r q3-by-q2-scales}
+pos_items <- c("q2_02","q2_05","q2_06","q2_07","q2_09")
+con_items <- c("q2_01","q2_08","q2_10")
+df$pos_score <- rowMeans(df[, pos_items], na.rm = TRUE)
+df$con_score <- rowMeans(df[, con_items], na.rm = TRUE)
+df <- df %>% mutate(
+  pos_tertile = cut(pos_score, breaks = quantile(pos_score, c(0, 1/3, 2/3, 1), na.rm = TRUE),
+                    labels = c("Low positivity","Mid positivity","High positivity"),
+                    include.lowest = TRUE),
+  con_tertile = cut(con_score, breaks = quantile(con_score, c(0, 1/3, 2/3, 1), na.rm = TRUE),
+                    labels = c("Low concern","Mid concern","High concern"),
+                    include.lowest = TRUE)
+)
+by_pos <- df %>% filter(!is.na(pos_tertile)) %>% group_by(pos_tertile) %>%
+  summarise(`UK Gov`     = round(mean(q3_01 == 1) * 100, 1),
+            `Tech cos`   = round(mean(q3_03 == 1) * 100, 1),
+            Regulators   = round(mean(q3_06 == 1) * 100, 1),
+            `Inter-gov`  = round(mean(q3_08 == 1) * 100, 1), n = n()) %>%
+  rename(Group = 1) %>% mutate(Attitude = "Positivity")
+by_con <- df %>% filter(!is.na(con_tertile)) %>% group_by(con_tertile) %>%
+  summarise(`UK Gov`     = round(mean(q3_01 == 1) * 100, 1),
+            `Tech cos`   = round(mean(q3_03 == 1) * 100, 1),
+            Regulators   = round(mean(q3_06 == 1) * 100, 1),
+            `Inter-gov`  = round(mean(q3_08 == 1) * 100, 1), n = n()) %>%
+  rename(Group = 1) %>% mutate(Attitude = "Concern")
+bind_rows(by_pos, by_con) %>%
+  dplyr::select(Attitude, Group, `UK Gov`, `Tech cos`, Regulators, `Inter-gov`, n) %>%
+  kable(caption = "Q3 preferences by positivity and concern tertiles")
+```
+
+**Reading.** Higher-positivity respondents nominate *more* actors
+across the board — they trust multiple institutions. Higher-concern
+respondents concentrate on UK Gov and independent regulators; they
+pull back from tech companies. Attitudes shape the mix of actors, not
+the ordering. UK Gov is the consensus first pick across every
+attitudinal group.
+
+## Brief demographic cross-check
+
+```{r q3-by-demo-compact}
+q3_demo <- function(var, name) {
+  df %>% filter(!is.na(.data[[var]])) %>% group_by(.data[[var]]) %>%
+    summarise(`UK Gov`    = round(mean(q3_01 == 1) * 100, 1),
+              `Tech cos`  = round(mean(q3_03 == 1) * 100, 1),
+              Regs        = round(mean(q3_06 == 1) * 100, 1),
+              `Inter-gov` = round(mean(q3_08 == 1) * 100, 1),
+              n = n()) %>%
+    rename(Group = 1) %>% mutate(Variable = name, Group = as.character(Group)) %>%
+    dplyr::select(Variable, Group, `UK Gov`, `Tech cos`, Regs, `Inter-gov`, n)
+}
+bind_rows(
+  q3_demo("age_band",       "Age"),
+  q3_demo("seg",            "SEG"),
+  q3_demo("has_disability", "Disability")
+) %>% kable(caption = "Q3 top actors by key demographics")
+```
+
+Most demographic variation in Q3 is modest — governance preferences
+are more stable across the public than attitudes are. The one
+exception: disabled respondents nominate independent regulators much
+more often (~44% vs ~31%).
+
+## Aim 3 summary
+
+The public wants shared governance: UK Government leads, tech
+companies second, independent regulators third. Attitudes shift the
+mix (positive-leaning people name more actors; concerned people pull
+back from industry) but not the ordering. The public expects industry
+to act but does not trust industry to act alone.
+
+---
+
+# Aim 4 — Distinct publics (cluster analysis)
+
+*The social fault lines the revolution creates — not just "the public"
+but distinct mindsets within it.*
+
+The brief: segment on attitudes, profile with *selected* demographic
+variables, and name the clusters.
+
+## Method
+
+K-means on the 10 Q2 items + 5 Q4 items, all standardised. Only
+respondents with complete data on all 15 variables are used.
+
+```{r kselect, fig.cap="Silhouette and elbow diagnostics"}
+clust_df <- df[, c(q2_cols, q4_cols)] %>% tidyr::drop_na()
+s <- scale(clust_df)
+set.seed(42)
+wss <- sapply(2:6, function(k) kmeans(s, k, nstart = 25)$tot.withinss)
+sil <- sapply(2:6, function(k) {
+  km <- kmeans(s, k, nstart = 25)
+  mean(cluster::silhouette(km$cluster, dist(s))[,3])
+})
+par(mfrow = c(1,2))
+plot(2:6, wss, type="b", pch=19, xlab="k", ylab="Within SS", main="Elbow")
+plot(2:6, sil, type="b", pch=19, xlab="k", ylab="Avg silhouette", main="Silhouette")
+```
+
+Silhouette favours k = 2; we retain k = 4 for interpretability. The
+brief asks for segmentation useful for communication — four groups
+surface the middle ground between the polar extremes. This is a
+stated trade-off.
+
+## Four-cluster solution
+
+```{r kfit}
+set.seed(42)
+km <- kmeans(s, 4, nstart = 25)
+clust_df$cluster <- factor(km$cluster)
+prof <- clust_df %>% group_by(cluster) %>%
+  summarise(across(everything(), ~round(mean(.x), 2)), n = n())
+kable(prof, caption = "Cluster means (standardised) on each attitude/perception item")
+```
+
+```{r k-demo}
+df$cluster <- NA
+cc <- complete.cases(df[, c(q2_cols, q4_cols)])
+df$cluster[cc] <- km$cluster
+df$cluster <- factor(df$cluster)
+pct_in <- function(x, vals) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA_real_)
+  round(mean(x %in% vals) * 100, 1)
+}
+df %>% filter(!is.na(cluster)) %>% group_by(cluster) %>%
+  summarise(
+    n             = n(),
+    `% 18-34`     = pct_in(age_band,  c("18-24","25-34")),
+    `% 65+`       = pct_in(age_band,  "65+"),
+    `% female`    = pct_in(gender,    "Female"),
+    `% AB`        = pct_in(seg,       c("A","B")),
+    `% DE`        = pct_in(seg,       c("D","E")),
+    `% uni+`      = pct_in(education, c("University degree","Higher degree/doctorate")),
+    `% weekly AI` = pct_in(usage_bin, "Weekly+"),
+    `% never AI`  = pct_in(usage_bin, "Never")
+  ) %>% kable(caption = "Cluster profile — selected demographics (% within cluster)")
+```
+
+## Cluster names (proposed — rework as needed)
+
+Working names based on the mean profiles. Swap freely.
+
+- **Cluster 1 — "Cautious middle."** Moderate concerns, middling Q4
+  perceptions, older-leaning. The quiet majority.
+- **Cluster 2 — "Ambivalent."** Near-centre on every item, younger,
+  mixed on usage. Haven't formed a strong view.
+- **Cluster 3 — "Enthusiasts."** Highest positivity means, highest
+  Q4 benefit score. Youngest, most AB, heaviest AI users.
+- **Cluster 4 — "Alarmed."** Extremely negative positivity, highest
+  privacy concern. Oldest, most female, skews DE.
+
+Verify against the cluster-means table before publishing — k-means
+label numbering is arbitrary, so the cluster numbered "3" here may or
+may not be the enthusiasts on another run. Re-check against the mean
+profile.
+
+## Cluster governance patterns
+
+```{r q3-cluster}
+qc <- df %>% filter(!is.na(cluster)) %>% group_by(cluster) %>%
+  summarise(across(all_of(q3_cols), ~round(mean(.x == 1, na.rm = TRUE)*100, 1)))
+colnames(qc)[-1] <- q3_labels
+kable(qc[, c("cluster","UK Government","Tech companies","Independent regulators","Don't know")],
+      caption = "Selected governance choices by cluster (%)")
+```
+
+**Reading.** All four clusters put UK Gov at the top — no cluster is
+anti-state. Enthusiasts show the highest trust in tech companies; the
+Alarmed lean hardest on UK Gov. Independent regulators are
+consistently the third pillar. Disagreement is about *how much
+industry to trust*, not whether governance is needed.
+
+## Aim 4 summary
+
+Four stable clusters: Cautious middle, Ambivalent, Enthusiasts,
+Alarmed. They differ most sharply on positivity and trust in industry
+self-governance; they agree that AI should be governed and UK
+Government is the right anchor. The clusters are strongly predicted
+by age and usage, modestly by SEG, and not meaningfully by secondary
+demographics.
+
+---
+
+# Aim 5 — Open-ended hopes and concerns (Q5)
+
+*The lived language of the revolution — what people say in their own
+words when no answer options are pre-supplied.*
+
+The brief: identify themes, sentiments and language; relate back to the
+Aim 4 clusters.
+
+## Response coverage
+
+```{r q5-coverage}
+q5 <- df$q5
+n_blank <- sum(is.na(q5) | nchar(trimws(q5)) == 0)
+q5_low <- tolower(trimws(q5))
+junk_patterns <- "^(n/?a|none|nothing|no|nope|idk|dk|dont know|don't know|no idea|no comment|\\.|-|\\?)$"
+n_junk <- sum(!is.na(q5_low) & grepl(junk_patterns, q5_low))
+n_substantive <- sum(!is.na(q5_low) & !grepl(junk_patterns, q5_low) & nchar(q5_low) > 3)
+data.frame(
+  Category = c("Total rows","Blank","'Junk' (nothing/none/N/A/etc)","Substantive responses"),
+  n = c(length(q5), n_blank, n_junk, n_substantive),
+  pct = round(c(length(q5), n_blank, n_junk, n_substantive) / length(q5) * 100, 1)
+) %>% kable(caption = "Q5 response coverage")
+```
+
+Everything below is restricted to **substantive responses** (> 3
+characters and not a dismissive token).
+
+```{r q5-prep}
+q5_clean <- tolower(trimws(q5))
+q5_sub <- q5_clean
+q5_sub[grepl(junk_patterns, q5_sub) | nchar(q5_sub) <= 3 | is.na(q5_sub)] <- NA
+df$q5_substantive <- q5_sub
+df$q5_has_text <- !is.na(q5_sub)
+```
+
+## Response length
+
+```{r q5-length, fig.cap="Length of substantive Q5 responses (words)"}
+wc <- function(t) ifelse(is.na(t), NA, length(strsplit(t, "\\s+")[[1]]))
+df$q5_words <- sapply(df$q5_substantive, wc)
+data.frame(
+  Metric = c("Median words","Mean words","Max words"),
+  Value  = c(median(df$q5_words, na.rm = TRUE),
+             round(mean(df$q5_words, na.rm = TRUE), 1),
+             max(df$q5_words, na.rm = TRUE))
+) %>% kable()
+df %>% filter(!is.na(q5_words), q5_words <= 60) %>%
+  ggplot(aes(q5_words)) + geom_histogram(binwidth = 2, fill = "#2E86AB") +
+  labs(x = "Words per response", y = "Count")
+```
+
+## Top words and bigrams
+
+```{r q5-words}
+stop_w <- c("the","a","an","and","or","but","is","are","was","were","be","been","being",
+            "have","has","had","do","does","did","will","would","could","should","may",
+            "might","can","i","you","he","she","it","we","they","me","him","her","us",
+            "them","my","your","his","its","our","their","this","that","these","those",
+            "of","in","on","at","to","for","with","from","by","as","about","into","over",
+            "not","no","so","if","too","than","then","very","more","most","some","any",
+            "all","there","what","just","who","when","where","why","how","also","very",
+            "really","think","thing","things","am","ai","get","going","use","using","used")
+tok <- function(t) {
+  if (is.na(t)) return(character(0))
+  t <- gsub("[^a-z ]", " ", t)
+  x <- unlist(strsplit(t, "\\s+"))
+  x[nchar(x) > 2 & !x %in% stop_w]
+}
+all_tok <- unlist(lapply(df$q5_substantive, tok))
+top_words <- sort(table(all_tok), decreasing = TRUE)[1:25]
+data.frame(Word = names(top_words), Count = as.integer(top_words)) %>%
+  kable(caption = "Top 25 words in substantive Q5 responses")
+```
+
+```{r q5-bigrams}
+bigrams <- function(t) {
+  toks <- tok(t)
+  if (length(toks) < 2) return(character(0))
+  paste(toks[-length(toks)], toks[-1], sep = " ")
+}
+all_bg <- unlist(lapply(df$q5_substantive, bigrams))
+top_bg <- sort(table(all_bg), decreasing = TRUE)[1:15]
+data.frame(Bigram = names(top_bg), Count = as.integer(top_bg)) %>%
+  kable(caption = "Top 15 bigrams (2-word phrases)")
+```
+
+**Reading.** The top words cluster around jobs, work, human/humans,
+and control. Bigrams surface the anxieties more sharply: "job
+losses", "human interaction", "take over", "tech companies", "fewer
+jobs". These are the dominant concerns in respondents' own words.
+
+## Theme detection (dictionary approach)
+
+Rather than fit an opaque topic model, we pre-specify theme
+dictionaries and flag each substantive response for each theme. Every
+classification is traceable to a keyword.
+
+```{r q5-themes}
+themes <- list(
+  `Jobs & economy`         = c("job","jobs","employment","work","workforce","redundan",
+                               "replace","replaced","unemploy","livelihood","careers","career"),
+  `Privacy & surveillance` = c("privacy","private","data","surveillance","tracking",
+                               "personal information","identity","hack","leak"),
+  `Loss of human contact`  = c("human interaction","personal interaction","human contact",
+                               "connection","empathy","lonely","loneliness","isolation","relationship"),
+  `Control & autonomy`     = c("control","out of control","take over","takeover","autonomy",
+                               "dominate","dependence","dependent","reliance","rely on"),
+  `Bias, fairness, inequality` = c("bias","biased","fairness","discrimination","inequality",
+                                   "unequal","left behind","divide"),
+  `Misinformation & trust`  = c("misinformation","fake news","fake","deepfake","deep fake",
+                                "trust","truth","lies","lying","manipulation"),
+  `Safety & harm`           = c("safety","safe","danger","dangerous","harm","harmful","risk",
+                                "risky","threat","threatening","weapon","war","destroy"),
+  `Regulation & governance` = c("regulat","govern","law","legal","rule","rules","policy",
+                                "oversight","guidelines"),
+  `Healthcare & medicine`   = c("health","medical","medicine","doctor","nhs","disease","cure",
+                                "diagnos","treatment","patient"),
+  `Education & learning`    = c("school","student","education","learn","learning","teach","teacher",
+                                "homework","essay","cheat"),
+  `Creativity & art`        = c("art","artist","creative","creativity","music","writer","writing",
+                                "copyright","plagiar"),
+  `Environment & climate`   = c("climate","environment","energy","carbon","sustainab","planet"),
+  `Efficiency & benefits`   = c("efficien","productiv","faster","speed","accuracy","accurate",
+                                "improve","benefit","useful","help","helpful","opportunity","opportunities"),
+  `Hope & optimism`         = c("hope","hopeful","optimis","exciting","excited","positive","promising",
+                                "progress","breakthrough","amazing","wonderful"),
+  `Fear & pessimism`        = c("fear","afraid","scared","worried","worry","concern","anxious",
+                                "terrify","pessimis","negative","doom")
+)
+tag_theme <- function(text, keywords) {
+  if (is.na(text)) return(FALSE)
+  any(sapply(keywords, function(k) grepl(k, text, fixed = FALSE)))
+}
+for (nm in names(themes)) {
+  df[[paste0("th_", nm)]] <- sapply(df$q5_substantive, tag_theme, keywords = themes[[nm]])
+}
+th_cols <- paste0("th_", names(themes))
+theme_counts <- sapply(df[th_cols], sum, na.rm = TRUE)
+names(theme_counts) <- names(themes)
+n_sub <- sum(df$q5_has_text, na.rm = TRUE)
+data.frame(
+  Theme = names(theme_counts),
+  n     = as.integer(theme_counts),
+  `% of substantive responses` = round(theme_counts / n_sub * 100, 1),
+  check.names = FALSE
+) %>% arrange(desc(n)) %>%
+  kable(caption = sprintf("Theme prevalence in Q5 (substantive n = %d)", n_sub))
+```
+
+**Reading.** The dominant themes are *Jobs & economy*, *Control &
+autonomy* and *Fear & pessimism* — painting a more anxious picture
+than the Q2 net-agree scores alone. *Hope & optimism* appears but is
+secondary. *Privacy & surveillance* shows up less in free text than
+in forced choice (where it was a top Q2 concern) — a useful reminder
+that Likert scales can elevate concerns respondents would not have
+raised spontaneously. *Healthcare* and *Education* appear as positive
+use-cases, consistent with the Enthusiast cluster.
+
+## Simple sentiment lean
+
+Count of positive- vs negative-leaning words against a small
+dictionary. Crude but transparent.
+
+```{r q5-sentiment}
+pos_words <- c("good","great","hope","hopeful","hopes","benefit","benefits","useful",
+               "helpful","help","improve","improvement","better","positive","opportunity",
+               "opportunities","exciting","amazing","wonderful","progress","efficient",
+               "faster","accurate","promising","optimistic","love","like")
+neg_words <- c("bad","worry","worried","worries","concern","concerned","concerns","afraid",
+               "scared","scary","danger","dangerous","threat","threatening","harm","harmful",
+               "risk","risky","loss","losses","lose","losing","replace","replaced","replacing",
+               "destroy","destruction","fear","fearful","negative","terrible","awful","hate",
+               "dislike","fake","lies","lying","manipulation","unemployment","redundancy")
+score_sent <- function(toks) {
+  if (length(toks) == 0) return(c(pos = 0, neg = 0, net = 0))
+  p <- sum(toks %in% pos_words)
+  n <- sum(toks %in% neg_words)
+  c(pos = p, neg = n, net = p - n)
+}
+sent <- t(sapply(df$q5_substantive, function(t) score_sent(tok(t))))
+df$q5_pos <- sent[, "pos"]
+df$q5_neg <- sent[, "neg"]
+df$q5_net <- sent[, "net"]
+df$q5_lean <- factor(
+  ifelse(is.na(df$q5_substantive), NA,
+    ifelse(df$q5_net > 0, "Positive",
+      ifelse(df$q5_net < 0, "Negative", "Mixed/neutral"))),
+  levels = c("Negative","Mixed/neutral","Positive"))
+df %>% filter(!is.na(q5_lean)) %>% count(q5_lean) %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  kable(caption = "Sentiment lean of substantive Q5 responses")
+```
+
+**Reading.** Free text runs more negative than the Q2 scales do —
+expected, because open prompts surface what *bothers* respondents,
+while Q2 is pre-balanced. Treat sentiment lean as a tone indicator,
+not a replacement for Q2.
+
+## Themes × clusters (the brief's ask)
+
+Do the four clusters raise different concerns in their own words?
+
+```{r q5-themes-by-cluster}
+th_by_cluster <- df %>% filter(!is.na(cluster), q5_has_text) %>%
+  group_by(cluster) %>% summarise(
+    n = n(),
+    across(all_of(th_cols), ~round(mean(.x) * 100, 1))
+  )
+colnames(th_by_cluster)[-(1:2)] <- names(themes)
+long <- tidyr::pivot_longer(th_by_cluster, -c(cluster, n),
+                            names_to = "Theme", values_to = "pct")
+long %>% tidyr::pivot_wider(names_from = cluster, values_from = pct,
+                            names_prefix = "Cluster ") %>%
+  kable(caption = "% of substantive Q5 responses mentioning each theme, by cluster")
+```
+
+```{r q5-sent-by-cluster}
+df %>% filter(!is.na(cluster), !is.na(q5_lean)) %>%
+  group_by(cluster, q5_lean) %>% summarise(n = n(), .groups = "drop_last") %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  dplyr::select(cluster, q5_lean, pct) %>%
+  tidyr::pivot_wider(names_from = q5_lean, values_from = pct) %>%
+  kable(caption = "Sentiment lean by cluster (%)")
+```
+
+**Reading.** The cluster structure from the forced-choice items
+reproduces itself in the free text.
+
+- **Enthusiasts** over-index on *Efficiency & benefits*, *Hope &
+  optimism*, *Healthcare* and *Education* — same themes as the rest,
+  but in an upbeat register.
+- **Alarmed** over-index on *Jobs*, *Control & autonomy*, *Fear &
+  pessimism*, *Loss of human contact*. Most negative sentiment lean.
+- **Cautious middle** cover the full thematic range with a
+  moderately negative sentiment lean.
+- **Ambivalent** write shorter, more neutral responses, consistent
+  with their undecided profile in Q2/Q4.
+
+This is the payoff of Aim 5: the open text validates and enriches the
+Aim 4 segmentation. The clusters describe genuinely different ways of
+talking about AI, not just statistical artefacts.
+
+## Example quotes per cluster
+
+```{r q5-examples}
+set.seed(11)
+examples <- df %>% filter(!is.na(cluster), q5_has_text, q5_words >= 5, q5_words <= 40) %>%
+  group_by(cluster) %>% slice_sample(n = 3) %>%
+  dplyr::select(cluster, q5)
+kable(examples, caption = "Illustrative Q5 responses per cluster (randomly sampled)")
+```
+
+Read these to sanity-check the named clusters — if the Enthusiast
+quotes sound enthusiastic and the Alarmed quotes sound alarmed, the
+labels hold.
+
+## Aim 5 summary
+
+The British public's free-text responses are dominated by three
+concerns: jobs, loss of control, and fear of AI outpacing human
+agency. Hope and optimism are present but secondary. Theme
+distribution and sentiment lean align with the Aim 4 clusters,
+validating the segmentation: Enthusiasts talk up benefits and
+progress, the Alarmed talk about job loss and control, middle groups
+sit between. The open text does not contradict the closed-question
+results — it adds tonal texture the Q2 scales can't capture.
+
+---
+
+# Discussion — a revolution unlike its predecessors
+
+## The story the data tells
+
+Past industrial revolutions hit specific groups. Mechanisation
+threatened skilled artisans; assembly-line automation worried factory
+workers. Across decades of survey research, the pattern that followed
+was robust: educated and affluent groups tended to be more
+enthusiastic about new technology, working-class groups more
+skeptical. Anxiety was concentrated where the threat landed.
+
+This survey suggests **the AI revolution is breaking that pattern, but
+not in the direction one might first expect.** Three findings combine
+into a single story:
+
+1. **Adoption is sharply stratified.** Age, education, SEG and
+   news-consumption style all predict whether someone uses AI weekly.
+   The "digital divide" label fits. *(Aim 1)*
+2. **Job anxiety is not stratified.** Roughly 80% of the public agrees
+   AI will reduce jobs — and that agreement is essentially flat across
+   social grade, working status (apart from the retired) and education
+   tier. The traditional class divide in tech anxiety has *flattened*,
+   not flipped. *(Aim 2 deep dive)*
+3. **Optimism is stratified.** ABC1 hold the same societal worry but
+   pair it with more personal optimism — they expect society to lose
+   jobs and still see AI as good for them. C2DE share the worry
+   without the upside. *(Personal benefit vs societal threat split)*
+
+The clusters and the open text reinforce this reading. The Alarmed
+cluster — concentrated in DE, older, female-skewed — speaks the
+language of jobs, control and loss. The Enthusiasts — concentrated in
+AB, younger, heavy users — speak the language of efficiency, hope and
+opportunity. Both clusters acknowledge job loss is coming. They
+disagree about whether they personally benefit. *(Aims 4 and 5)*
+
+## The new fault line
+
+The conventional question — *who is worried about AI?* — has a flat
+answer in this dataset: most people. The more useful question this
+survey actually answers is *who gets to be hopeful?* — and that
+question still has a class answer.
+
+This reframes the typical narrative. The revolution has not produced a
+new class of the worried; it has produced a near-universal worry, on
+top of which optimism is unevenly distributed.
+
+## Implications
+
+**For policymakers.** The communication challenge is not reassuring
+"the worried" — there is no concentrated worried group to target.
+Anxiety about jobs is a baseline. The harder task is closing the
+optimism gap: giving the C2DE half of the public a *personal stake*
+in the upside (skills, access to AI tools, visible career paths).
+Industrial-policy framings that treat AI as an elite-only opportunity
+will widen the existing optimism divide, not narrow it.
+
+**For businesses.** Adoption follows age, education, SEG and digital
+news-consumption — not gender, ethnicity or family situation. Mass-
+market AI products that assume universal digital fluency will
+under-perform in the older, lower-SEG half of the market. The
+governance picture matters too: the public expects AI firms to act
+within a UK Government and independent-regulator framework. Pure
+self-regulation has the lowest public trust of any item in Q2.
+
+**For the AI industry.** Trust is not absent — it is conditional.
+Across all four attitudinal clusters, including the Enthusiasts, UK
+Government is named more often than tech companies as the right
+governance anchor. Industry credibility flows *through* a regulatory
+frame, not around it.
+
+**For consumers and the public conversation.** The interesting public
+disagreement is not optimist vs pessimist on the technology itself —
+it is whether AI's benefits will be broadly shared. That is the debate
+the survey suggests communicators, journalists and policymakers
+should be having.
+
+## What surprised us
+
+We came into this analysis expecting one of two pre-committed stories:
+either the traditional pattern (DE most worried, ABC1 relaxed) or a
+clean inversion (knowledge workers now most worried). The data
+supports neither. The honest answer is: **anxiety has become a
+consensus, optimism has not.** That is a more nuanced finding than
+either pre-committed thesis — and arguably the more important one.
+
+---
+
+# Limitations
+
+- **Frequency ≠ purpose.** Q1 captures how often people use AI, not
+  what for. We can describe who uses AI more; we cannot explain why.
+  Any functional interpretation (study tool vs emotional support vs
+  entertainment) is a hypothesis requiring follow-up research.
+- **Cluster stability.** Silhouette is highest at k = 2 (≈ 0.27); we
+  retained k = 4 for communication value. Any claim that "there are
+  four publics in Britain" overstates the statistical evidence —
+  better framed as "four useful personae capturing the attitudinal
+  poles and the middle ground."
+- **Scale reversal.** The brief mentions a split-sample reversal in
+  Q2 that is not visible in the data — we assume it has been applied
+  upstream. If that is wrong, Q2 findings need re-running.
+- **Weighting.** Design weights exist but are not applied. A final
+  submission should apply weights.
+- **Theme dictionary.** The Q5 theme tagging is keyword-based and
+  transparent, but blunt — a response mentioning "I don't worry
+  about jobs" will be tagged as a jobs concern. Hand-validation of a
+  subsample would tighten this.
+- **Ethnicity sample.** The minority-ethnic sample is ≈85 respondents
+  (~15% of n = 569). Enough for headline chi-square tests, too small
+  for reliable sub-group cuts. Findings are directional.
+
+---
+
+*End of v2 working draft.*
